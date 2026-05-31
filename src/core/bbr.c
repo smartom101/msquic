@@ -783,7 +783,20 @@ BbrCongestionControlUpdateCongestionWindow(
     }
 
     uint32_t CongestionWindow = Bbr->CongestionWindow;
+#if BBR_PHASE_A_LOSS_PATCH
+    //
+    // Phase A.5: floor the congestion window itself, not just the recovery
+    // window. GetCongestionWindow returns min(CongestionWindow, RecoveryWindow)
+    // while in recovery, so a CongestionWindow that collapses to kMinCwndInMss
+    // (when the bandwidth estimate drops during a loss burst) would otherwise
+    // nullify the higher recovery-window floor and pin the effective cwnd at
+    // 4*MSS.
+    //
+    uint32_t MinCongestionWindow =
+        CXPLAT_MAX(kMinCwndInMss, kBbrRecoveryFloorPackets) * DatagramPayloadLength;
+#else
     uint32_t MinCongestionWindow = kMinCwndInMss * DatagramPayloadLength;
+#endif
 
     if (Bbr->BtlbwFound) {
         CongestionWindow = (uint32_t)CXPLAT_MIN(TargetCwnd, CongestionWindow + AckedBytes);
@@ -975,7 +988,16 @@ BbrCongestionControlOnDataLost(
     }
 
     if (LossEvent->PersistentCongestion) {
+#if BBR_PHASE_A_LOSS_PATCH
+        //
+        // Phase A.5: keep persistent-congestion recovery at the higher floor
+        // too; dropping straight to kMinCwndInMss here also bypasses Phase A.
+        //
+        Bbr->RecoveryWindow =
+            CXPLAT_MAX(MinCongestionWindow, kBbrRecoveryFloorPackets * DatagramPayloadLength);
+#else
         Bbr->RecoveryWindow = MinCongestionWindow;
+#endif
 
         QuicTraceEvent(
             ConnPersistentCongestion,

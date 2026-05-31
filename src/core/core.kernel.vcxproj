@@ -22,6 +22,7 @@
     <ClCompile Include="ack_tracker.c" />
     <ClCompile Include="api.c" />
     <ClCompile Include="bbr.c" />
+    <ClCompile Include="bbr3.c" />
     <ClCompile Include="binding.c" />
     <ClCompile Include="configuration.c" />
     <ClCompile Include="congestion_control.c" />
@@ -64,6 +65,7 @@
     <ClInclude Include="ack_tracker.h" />
     <ClInclude Include="api.h" />
     <ClInclude Include="bbr.h" />
+    <ClInclude Include="bbr3.h" />
     <ClInclude Include="binding.h" />
     <ClInclude Include="cid.h" />
     <ClInclude Include="configuration.h" />
