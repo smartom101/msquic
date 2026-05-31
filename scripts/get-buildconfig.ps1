@@ -87,7 +87,10 @@ if ("" -eq $Arch) {
 # Default TLS based on current platform.
 if ("" -eq $Tls) {
     if ($IsWindows) {
-        $Tls = "schannel"
+        # 本 fork 改为 Windows 也默认 quictls：上层证书加载用了 OpenSSL-only 接口
+        # (CERTIFICATE_FILE_PROTECTED + SET_CA_CERTIFICATE_FILE + USE_TLS_BUILTIN_CERTIFICATE_VALIDATION)，
+        # Schannel 会在 ConfigurationLoadCredential 返回 0x80070057。
+        $Tls = "quictls"
     } else {
         $Tls = "quictls"
     }

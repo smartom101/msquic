@@ -18,6 +18,29 @@ if(BUILD_SHARED_LIBS)
     if (NOT WIN32)
         set_target_properties(msquic PROPERTIES SOVERSION ${QUIC_MAJOR_VERSION} VERSION ${QUIC_FULL_VERSION})
     endif()
+    if (WIN32)
+        # PRE_LINK: 在链接前拷贝 PGO 数据库，确保 Clean/Rebuild 后文件仍在。
+        # QUIC_PGO_FILE / QUIC_PGO_DIR 由父 CMakeLists.txt 在 configure 阶段设定。
+        if(QUIC_PGO_FILE AND EXISTS "${QUIC_PGO_FILE}")
+            add_custom_command(TARGET msquic PRE_LINK
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${QUIC_PGO_DIR}"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${QUIC_PGO_FILE}" "${QUIC_PGO_DIR}/${QUIC_PGO_NAME}"
+                COMMENT "Copying PGO database for /USEPROFILE link"
+            )
+        endif()
+
+        # POST_BUILD: 把产物同步到 open_source 依赖库
+        add_custom_command(TARGET msquic POST_BUILD
+            COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File
+                "${PROJECT_SOURCE_DIR}/sync-to-open-source.ps1"
+                -DllPath "$<TARGET_FILE:msquic>"
+                -LibPath "$<TARGET_LINKER_FILE:msquic>"
+                -PdbPath "$<TARGET_PDB_FILE:msquic>"
+                -SrcIncDir "${PROJECT_SOURCE_DIR}/src/inc"
+            COMMENT "Syncing msquic artifacts -> D:/MDIDS_GIT/open_source/msquic"
+        )
+    endif()
 else()
     add_library(msquic_static STATIC static/empty.c)
     target_link_libraries(msquic_static PRIVATE core msquic_platform inc logging main_binary_link_args)

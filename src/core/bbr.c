@@ -109,6 +109,43 @@ const uint32_t kBbrMaxBandwidthFilterLen = 10;
 
 const uint32_t kBbrMaxAckHeightFilterLen = 10;
 
+//
+// Phase A: BBRv1 loss-response patch (compile-time toggle for easy revert).
+//
+// Stock BBRv1 collapses the congestion window on links with sparse random loss
+// (~1-2%): every loss event subtracts all lost bytes from the recovery window
+// and floors it at kMinCwndInMss (4*MSS = ~5.9 KB), which throttles throughput
+// to near zero and never recovers. This patch makes the loss response tolerant
+// of sub-threshold (random) loss and decays gently instead of cliff-diving.
+//
+// IMPORTANT: this intentionally does NOT change kMinCwndInMss, because PROBE_RTT
+// deliberately drains to 4*MSS to sample min-RTT (see GetCongestionWindow). The
+// higher floor below applies only to the loss/recovery path.
+//
+// Set BBR_PHASE_A_LOSS_PATCH to 0 to restore stock BBRv1 behavior.
+//
+#ifndef BBR_PHASE_A_LOSS_PATCH
+#define BBR_PHASE_A_LOSS_PATCH 1
+#endif
+
+#if BBR_PHASE_A_LOSS_PATCH
+//
+// Recovery-window floor, in MSS, for the loss/recovery path only. 16*MSS ~= 23 KB.
+//
+const uint32_t kBbrRecoveryFloorPackets = 16;
+//
+// Per-event loss tolerance: if the bytes lost in a single loss event are below
+// this percentage of the pre-loss bytes-in-flight, treat it as random loss and
+// leave the recovery window unchanged (only enforce the floor).
+//
+const uint32_t kBbrLossTolerancePct = 5;
+//
+// Multiplicative decay applied to the recovery window on above-threshold loss,
+// as a percentage (70 => x0.70), instead of subtracting all lost bytes.
+//
+const uint32_t kBbrRecoveryDecayPct = 70;
+#endif
+
 _IRQL_requires_max_(DISPATCH_LEVEL)
 void
 BbrBandwidthFilterOnPacketAcked(
@@ -485,7 +522,12 @@ BbrCongestionControlUpdateRecoveryWindow(
     uint32_t RecoveryWindow = CXPLAT_MAX(
         Bbr->RecoveryWindow, Bbr->BytesInFlight + BytesAcked);
 
+#if BBR_PHASE_A_LOSS_PATCH
+    uint32_t MinCongestionWindow =
+        CXPLAT_MAX(kMinCwndInMss, kBbrRecoveryFloorPackets) * DatagramPayloadLength;
+#else
     uint32_t MinCongestionWindow = kMinCwndInMss * DatagramPayloadLength;
+#endif
 
     Bbr->RecoveryWindow = CXPLAT_MAX(RecoveryWindow, MinCongestionWindow);
 }
@@ -941,10 +983,40 @@ BbrCongestionControlOnDataLost(
             Connection);
         Connection->Stats.Send.PersistentCongestionCount++;
     } else {
+#if BBR_PHASE_A_LOSS_PATCH
+        //
+        // Recovery-window floor for the loss path (>= MinCongestionWindow).
+        //
+        uint32_t RecoveryFloor =
+            CXPLAT_MAX(MinCongestionWindow, kBbrRecoveryFloorPackets * DatagramPayloadLength);
+        //
+        // Pre-loss bytes-in-flight. BytesInFlight was already decremented above by
+        // LossEvent->NumRetransmittableBytes, so add it back to get the denominator.
+        //
+        uint64_t PreLossInFlight =
+            (uint64_t)Bbr->BytesInFlight + LossEvent->NumRetransmittableBytes;
+        if (PreLossInFlight != 0 &&
+            (uint64_t)LossEvent->NumRetransmittableBytes * 100 <
+                (uint64_t)kBbrLossTolerancePct * PreLossInFlight) {
+            //
+            // Sub-threshold (random) loss: do not shrink the window, only floor it.
+            //
+            Bbr->RecoveryWindow = CXPLAT_MAX(RecoveryWindow, RecoveryFloor);
+        } else {
+            //
+            // Above-threshold loss: gentle multiplicative decay instead of
+            // subtracting every lost byte (which is what collapses the window).
+            //
+            uint32_t DecayedWindow =
+                (uint32_t)((uint64_t)RecoveryWindow * kBbrRecoveryDecayPct / 100);
+            Bbr->RecoveryWindow = CXPLAT_MAX(DecayedWindow, RecoveryFloor);
+        }
+#else
         Bbr->RecoveryWindow =
             RecoveryWindow > LossEvent->NumRetransmittableBytes + MinCongestionWindow
             ? RecoveryWindow - LossEvent->NumRetransmittableBytes
             : MinCongestionWindow;
+#endif
     }
 
     BbrCongestionControlUpdateBlockedState(Cc, PreviousCanSendState);

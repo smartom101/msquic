@@ -241,3 +241,50 @@ pwsh ./scripts/build.ps1 -Config Release -Platform linux -Tls quictls -Arch x64 
 | Linux (quictls) | quictls (OpenSSL fork) | ✅ 与任一互通 |
 
 两者都实现标准 TLS 1.3，协议层完全兼容。Windows 客户端（schannel）与 Linux 服务端（quictls）可以正常建立 QUIC 连接。
+
+
+
+## 九、win使用openssl
+
+---
+  需要安装的工具
+
+    ┌───────────────┬──────────────────────────────────────────┬────────┬─────────────────────────────────────────────┐
+      │     工具      │                   作用                   │  检查  │                    下载                     │
+      ├───────────────┼──────────────────────────────────────────┼────────┼─────────────────────────────────────────────┤
+      │ Strawberry    │ 运行 quictls/Configure 脚本，生成        │ perl   │ https://strawberryperl.com                  │
+      │ Perl          │ opensslv.h 等                            │ -v     │                                             │
+      ├───────────────┼──────────────────────────────────────────┼────────┼─────────────────────────────────────────────┤
+      │ NASM          │ OpenSSL 汇编优化，Configure 时检测       │ nasm   │ https://www.nasm.us/pub/nasm/releasebuilds/ │
+      │               │                                          │ -v     │                                             │
+      └───────────────┴──────────────────────────────────────────┴────────┴─────────────────────────────────────────────┘
+
+  安装后把两者都加到系统 PATH，并重启 Visual Studio（让新 PATH 生效）。
+
+  安装后把两者都加到系统 PATH，并重启 Visual Studio（让新 PATH 生效）。
+
+  编译必须从 Developer Command Prompt 启动
+
+  OpenSSL 用 nmake 构建，这个命令只在 VS 的 Developer Command Prompt 里有。如果你直接双击 .sln 打开 VS，nmake 不在
+  PATH，perl Configure 能跑但 nmake install_dev 会失败，头文件就不会生成。
+
+  正确姿势：
+
+  ### 从"Developer Command Prompt for VS 2019"启动 VS
+  devenv D:\Codespace\msquic\build\windows\x64_quictls\msquic.sln
+
+  或者命令行构建（在 Developer Command Prompt 里）：
+
+  cmake --build D:\Codespace\msquic\build\windows\x64_quictls --config Release
+
+  完整步骤（装好工具后）
+
+  1. 安装 Strawberry Perl → 安装时选"Add to PATH"
+  2. 安装 NASM → 安装后手动加到系统 PATH
+  3. 打开"Developer Command Prompt for VS 2019"
+  4. 验证：perl -v  和  nasm -v  都能输出版本
+  5. 删除旧 build：Remove-Item -Recurse -Force D:\Codespace\msquic\build\windows\x64_quictls
+  6. cmake --preset windows-quictls
+  7. cmake --build --preset windows-release
+
+  构建时 OpenSSL 那步会比较慢（几分钟），看到 OpenSSL configure / OpenSSL build 输出就是正常在跑。

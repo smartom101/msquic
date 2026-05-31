@@ -48,18 +48,27 @@
             }
         },
         {
-            "name": "windows-schannel-debug",
-            "displayName": "Windows Schannel Debug",
-            "inherits": "win-base",
-            "binaryDir": "${sourceDir}/build/windows/x64_schannel",
+            "name": "windows-quictls",
+            "displayName": "Windows quictls (VS 2019, multi-config)",
+            "generator": "Visual Studio 16 2019",
             "architecture": {
                 "value": "x64",
-                "strategy": "external"
+                "strategy": "set"
             },
+            "binaryDir": "${sourceDir}/build/windows/x64_quictls",
             "cacheVariables": {
-                "QUIC_OUTPUT_DIR": "${sourceDir}/artifacts/bin/windows/x64_Debug_schannel",
-                "CMAKE_BUILD_TYPE": "Debug",
-                "QUIC_TLS_LIB": "schannel"
+                "QUIC_TLS_LIB": "quictls",
+                "QUIC_OUTPUT_DIR": "${sourceDir}/artifacts/bin/windows/x64_$<IF:$<CONFIG:Debug>,Debug,Release>_quictls",
+                "QUIC_ENABLE_LOGGING": "on",
+                "QUIC_BUILD_TOOLS": "on",
+                "QUIC_BUILD_TEST": "on",
+                "QUIC_BUILD_PERF": "on",
+                "QUIC_LIBRARY_NAME": "msquic"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
             }
         },
         {
@@ -82,13 +91,14 @@
         {
             "name": "windows-debug",
             "displayName": "Windows Debug",
-            "configurePreset": "windows-schannel-debug"
+            "configurePreset": "windows-quictls",
+            "configuration": "Debug"
         },
         {
-            "name": "windows-debug-clean",
-            "displayName": "Windows Debug (clean)",
-            "cleanFirst": true,
-            "configurePreset": "windows-schannel-debug"
+            "name": "windows-release",
+            "displayName": "Windows Release",
+            "configurePreset": "windows-quictls",
+            "configuration": "Release"
         },
         {
             "name": "linux-debug",

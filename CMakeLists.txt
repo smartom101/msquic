@@ -76,7 +76,8 @@ endif()
 
 # Set the default TLS method for each platform.
 if (WIN32)
-    set(QUIC_TLS_LIB "schannel" CACHE STRING "TLS Library to use")
+    # 本 fork：Windows 默认也用 quictls（与 scripts/get-buildconfig.ps1 同步；build.ps1 实际生效的是后者）
+    set(QUIC_TLS_LIB "quictls" CACHE STRING "TLS Library to use")
 else()
     set(QUIC_TLS_LIB "quictls" CACHE STRING "TLS Library to use")
 endif()
