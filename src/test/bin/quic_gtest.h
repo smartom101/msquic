@@ -307,7 +307,7 @@ struct HandshakeArgs10 {
         ::std::vector<HandshakeArgs10> list;
         for (int Family : { 4, 6 })
 #ifdef QUIC_API_ENABLE_PREVIEW_FEATURES
-        for (auto CcAlgo : { QUIC_CONGESTION_CONTROL_ALGORITHM_CUBIC, QUIC_CONGESTION_CONTROL_ALGORITHM_BBR })
+        for (auto CcAlgo : { QUIC_CONGESTION_CONTROL_ALGORITHM_CUBIC, QUIC_CONGESTION_CONTROL_ALGORITHM_BBR, QUIC_CONGESTION_CONTROL_ALGORITHM_BBR3 })
 #else
         for (auto CcAlgo : { QUIC_CONGESTION_CONTROL_ALGORITHM_CUBIC })
 #endif
@@ -319,7 +319,8 @@ struct HandshakeArgs10 {
 std::ostream& operator << (std::ostream& o, const HandshakeArgs10& args) {
     return o <<
         (args.Family == 4 ? "v4" : "v6") << "/" <<
-        (args.CcAlgo == QUIC_CONGESTION_CONTROL_ALGORITHM_CUBIC ? "cubic" : "bbr");
+        (args.CcAlgo == QUIC_CONGESTION_CONTROL_ALGORITHM_CUBIC ? "cubic" :
+         args.CcAlgo == QUIC_CONGESTION_CONTROL_ALGORITHM_BBR ? "bbr" : "bbr3");
 }
 
 class WithHandshakeArgs10 : public testing::Test,
