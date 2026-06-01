@@ -300,6 +300,13 @@ QuicLossDetectionUpdateTimer(
 
     uint64_t TimeFires;
     QUIC_LOSS_TIMER_TYPE TimeoutType;
+    //
+    // Cap the PTO backoff exponent so a long outage cannot push the next probe
+    // arbitrarily far out (see QUIC_MAX_PROBE_TIMEOUT_BACKOFF_EXP). ProbeCount
+    // itself is left untouched, so persistent-congestion detection is unchanged.
+    //
+    const uint32_t ProbeBackoffExp =
+        CXPLAT_MIN((uint32_t)LossDetection->ProbeCount, (uint32_t)QUIC_MAX_PROBE_TIMEOUT_BACKOFF_EXP);
     if (OldestPacket != NULL &&
         OldestPacket->PacketNumber < LossDetection->LargestAck &&
         QuicKeyTypeToEncryptLevel(OldestPacket->Flags.KeyType) <= LossDetection->LargestAckEncryptLevel) {
@@ -321,14 +328,14 @@ QuicLossDetectionUpdateTimer(
         TimeoutType = LOSS_TIMER_INITIAL;
         TimeFires =
             LossDetection->TimeOfLastPacketSent +
-            ((Path->SmoothedRtt + 4 * Path->RttVariance) << LossDetection->ProbeCount);
+            ((Path->SmoothedRtt + 4 * Path->RttVariance) << ProbeBackoffExp);
 
     } else {
         TimeoutType = LOSS_TIMER_PROBE;
         TimeFires =
             LossDetection->TimeOfLastPacketSent +
             QuicLossDetectionComputeProbeTimeout(
-                LossDetection, Path, 1 << LossDetection->ProbeCount);
+                LossDetection, Path, 1 << ProbeBackoffExp);
     }
 
     uint64_t Delay; // In microseconds

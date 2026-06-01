@@ -150,6 +150,35 @@ static const uint64_t kBbr3OeQueueDelayFloorUs = 2000; // 2 ms
 #endif
 
 //
+// Restart-from-idle. On a bad link with "dead windows" (stretches of near-100%
+// loss in one direction), delivery stalls completely: no acks arrive for
+// seconds. When the link recovers, the loss-decayed bandwidth/inflight bounds
+// are still pinned low, so plain BBR crawls back up through a full PROBE_BW
+// cycle (seconds) instead of re-probing quickly -- which is why an application
+// reconnect (a fresh STARTUP) visibly "restores speed" faster than waiting. To
+// recover without a reconnect, when an ack arrives after a delivery stall longer
+// than the threshold below, BBR re-enters STARTUP (lifting the stale bounds and
+// restoring the aggressive gains) so it re-ramps in a few RTTs. This only fires
+// after a multi-RTT / sub-second-plus gap with no acks, which never happens
+// during a healthy bulk transfer, so steady-state LAN behaviour is unchanged.
+// Set to 0 to fall back to plain PROBE_BW recovery.
+//
+#ifndef BBR3_RESTART_FROM_IDLE
+#define BBR3_RESTART_FROM_IDLE 1
+#endif
+
+#if BBR3_RESTART_FROM_IDLE
+//
+// A delivery stall is declared when the gap since the previous ack exceeds
+// max(floor, multiple * SmoothedRtt). The RTT multiple keeps it from tripping on
+// normal per-RTT ack spacing on high-rtt paths; the absolute floor keeps it from
+// tripping on ordinary sub-second app/scheduler jitter on low-rtt paths.
+//
+static const uint64_t kBbr3RestartIdleFloorUs = 1000000; // 1 s
+static const uint32_t kBbr3RestartIdleRttMultiple = 4;
+#endif
+
+//
 // ---------------------------------------------------------------------------
 // The congestion event passed between the model and the modes
 // (quic::Bbr2CongestionEvent). Built once per OnDataAcknowledged.
@@ -2096,6 +2125,44 @@ Bbr3CongestionControlOnDataInvalidated(
     return PreviousCanSendState == FALSE && Bbr3CongestionControlCanSend(Cc);
 }
 
+#if BBR3_RESTART_FROM_IDLE
+//
+// Soft STARTUP re-entry after a delivery stall (a bad-link "dead window").
+// Mirrors the STARTUP portion of Bbr3CongestionControlInitialize: it lifts the
+// loss-decayed bandwidth/inflight bounds back to "infinite", restores the
+// aggressive STARTUP gains, and resets full-bandwidth detection, so the resumed
+// flow re-ramps like a fresh connection. It deliberately PRESERVES MinRtt, the
+// max-bandwidth filter, byte totals and the live cwnd / in-flight accounting,
+// and does NOT touch the pending-loss accumulator that the current ack pass is
+// about to fold in, so it is cheaper and better-informed than an actual
+// reconnect.
+//
+_IRQL_requires_max_(DISPATCH_LEVEL)
+void
+Bbr3RestartFromIdle(
+    _In_ QUIC_CONGESTION_CONTROL* Cc
+    )
+{
+    QUIC_CONGESTION_CONTROL_BBR3* Bbr = &Cc->Bbr3;
+
+    Bbr->BbrMode = BBR3_MODE_STARTUP;
+    Bbr->ProbePhase = BBR3_PROBE_NOT_STARTED;
+    Bbr->CwndGain = kBbr3StartupCwndGain;
+    Bbr->PacingGain = kBbr3StartupPacingGain;
+
+    Bbr->BandwidthLo = BBR3_INFINITE_BANDWIDTH;
+    Bbr->InflightLo = BBR3_INFINITE_INFLIGHT;
+    Bbr->InflightHi = BBR3_INFINITE_INFLIGHT;
+
+    Bbr->FullBandwidthReached = FALSE;
+    Bbr->FullBandwidthBaseline = 0;
+    Bbr->RoundsWithoutBandwidthGrowth = 0;
+    Bbr->InflightHiLimitedInRound = FALSE;
+
+    Bbr3LogState(Cc, "idle-restart");
+}
+#endif // BBR3_RESTART_FROM_IDLE
+
 _IRQL_requires_max_(DISPATCH_LEVEL)
 BOOLEAN
 Bbr3CongestionControlOnDataAcknowledged(
@@ -2105,6 +2172,30 @@ Bbr3CongestionControlOnDataAcknowledged(
 {
     QUIC_CONGESTION_CONTROL_BBR3* Bbr = &Cc->Bbr3;
     BOOLEAN PreviousCanSendState = Bbr3CongestionControlCanSend(Cc);
+
+#if BBR3_RESTART_FROM_IDLE
+    //
+    // If delivery stalled (no acks arrived) for longer than the threshold and we
+    // are not already ramping in STARTUP, treat this ack as a restart from idle:
+    // re-enter STARTUP so the path is re-probed in a few RTTs instead of crawling
+    // back up through a full PROBE_BW cycle. The threshold is well above normal
+    // per-RTT ack spacing, so this never fires during a healthy transfer.
+    //
+    if (Bbr->LastAckTimeValid && Bbr->BbrMode != BBR3_MODE_STARTUP) {
+        uint64_t IdleThreshold = kBbr3RestartIdleFloorUs;
+        uint64_t RttThreshold =
+            (uint64_t)AckEvent->SmoothedRtt * kBbr3RestartIdleRttMultiple;
+        if (RttThreshold > IdleThreshold) {
+            IdleThreshold = RttThreshold;
+        }
+        if (AckEvent->TimeNow > Bbr->LastAckTime &&
+            AckEvent->TimeNow - Bbr->LastAckTime > IdleThreshold) {
+            Bbr3RestartFromIdle(Cc);
+        }
+    }
+    Bbr->LastAckTime = AckEvent->TimeNow;
+    Bbr->LastAckTimeValid = TRUE;
+#endif // BBR3_RESTART_FROM_IDLE
 
     //
     // BytesInFlight currently excludes bytes already removed by OnDataLost
@@ -2378,6 +2469,9 @@ Bbr3CongestionControlInitialize(
     Bbr->RecentAckBytes[1] = 0;
     Bbr->A0CandHead = 0;
     Bbr->A0CandCount = 0;
+
+    Bbr->LastAckTime = 0;
+    Bbr->LastAckTimeValid = FALSE;
 }
 
 _IRQL_requires_max_(DISPATCH_LEVEL)

@@ -77,6 +77,7 @@ typedef struct QUIC_CONGESTION_CONTROL_BBR3 {
     BOOLEAN LastCycleStoppedRiskyProbe : 1;
     BOOLEAN ProbeRttExitTimeValid : 1;
     BOOLEAN EcnRecoveryValid : 1; // an ECN-CE backoff has been recorded
+    BOOLEAN LastAckTimeValid : 1; // a prior ack time is recorded (restart-from-idle)
 
     //
     // Congestion window state (bytes).
@@ -222,6 +223,13 @@ typedef struct QUIC_CONGESTION_CONTROL_BBR3 {
     uint64_t A0CandBytes[BBR3_A0_CANDIDATES_MAX]; // total bytes acked
     uint32_t A0CandHead;
     uint32_t A0CandCount;
+
+    //
+    // Restart-from-idle: time of the most recently processed ack. A gap larger
+    // than the restart threshold marks a delivery stall (a bad-link "dead
+    // window"); the next ack then re-enters STARTUP. See bbr3.c.
+    //
+    uint64_t LastAckTime; // microseconds
 
 } QUIC_CONGESTION_CONTROL_BBR3;
 

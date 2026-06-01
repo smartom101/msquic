@@ -86,6 +86,20 @@ typedef struct QUIC_RX_PACKET QUIC_RX_PACKET;
 #define QUIC_PERSISTENT_CONGESTION_THRESHOLD    2
 
 //
+// Upper bound on the PTO (probe timeout) backoff exponent. RFC 9002 doubles the
+// PTO on every consecutive probe timeout (the timer is computed as
+// base << ProbeCount). Without a cap, a sustained link outage drives the next
+// probe many seconds into the future, so even after the link recovers the
+// connection sits idle for a long time before it re-probes and notices. Capping
+// the exponent bounds that re-probe latency (and the worst-case is still bounded
+// by DisconnectTimeoutMs). It only takes effect deep in an outage -- ProbeCount
+// is 0-2 on healthy paths -- so it does not change steady-state behaviour. It
+// also avoids undefined behaviour from shifting by >= the operand width when
+// ProbeCount grows large. Raise toward 32 to effectively disable the cap.
+//
+#define QUIC_MAX_PROBE_TIMEOUT_BACKOFF_EXP      5
+
+//
 // The number of probe timeouts' worth of time to wait in the closing period
 // before timing out.
 //
