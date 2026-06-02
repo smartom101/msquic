@@ -25,9 +25,6 @@ Abstract:
 --*/
 
 #include "precomp.h"
-#ifdef QUIC_CLOG
-#include "bbr3.c.clog.h"
-#endif
 
 //
 // Debugging instrumentation: file tracing. DISABLED -- synchronous file I/O from
