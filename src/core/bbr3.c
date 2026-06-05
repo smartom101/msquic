@@ -46,6 +46,15 @@ Abstract:
 
 #define kMicroSecsInSec 1000000ULL
 
+//
+// [MDIDS] Minimum effective pacing rate (BW_UNIT-scaled bytes/sec), used only locally
+// inside Bbr3CongestionControlGetSendAllowance so idle/app-limited connections do not
+// starve small sends when PacingRate decays toward zero. 16 KB/s (128 kbps) is far
+// below any usable link; the cwnd guard still caps in-flight, so this never bursts
+// beyond congestion control.
+//
+#define BBR3_MIN_PACING_RATE (16000ULL * BW_UNIT)
+
 #define BBR3_INFINITE_BANDWIDTH UINT64_MAX
 #define BBR3_INFINITE_INFLIGHT  UINT64_MAX
 
@@ -2040,18 +2049,35 @@ Bbr3CongestionControlGetSendAllowance(
 
     uint32_t Available = CongestionWindow - Bbr->BytesInFlight;
 
-    if (!TimeSinceLastSendValid || Bbr->PacingRate == 0) {
-        //
-        // No pacing information yet: allow up to the congestion window.
-        //
+    //
+    // [MDIDS fix #1] Honor QUIC_SETTINGS.PacingEnabled (stock bbr.c checks it in this
+    // same spot; the custom BBR3 had omitted it). When pacing is disabled, or there is
+    // no pacing info yet, allow up to the congestion window.
+    //
+    QUIC_CONNECTION* Connection = QuicCongestionControlGetConnection(Cc);
+    if (!TimeSinceLastSendValid || Bbr->PacingRate == 0 ||
+        !Connection->Settings.PacingEnabled) {
         return Available;
+    }
+
+    //
+    // [MDIDS fix #2] Floor the effective pacing rate locally. The custom BBR3 lets
+    // PacingRate decay to ~tens of B/s on idle/app-limited connections, which starves
+    // small sends (e.g. heartbeat replies) for seconds. Apply a low minimum rate so a
+    // small message always drains promptly. This is NOT written back to Bbr->PacingRate
+    // (no effect on bandwidth sampling/probing). The floor is far below any usable link,
+    // and the cwnd guard above still caps in-flight, so it never bursts beyond CC.
+    //
+    uint64_t EffectivePacingRate = Bbr->PacingRate;
+    if (EffectivePacingRate < BBR3_MIN_PACING_RATE) {
+        EffectivePacingRate = BBR3_MIN_PACING_RATE;
     }
 
     //
     // Pacing allowance = pacing_rate * elapsed. PacingRate is BW_UNIT-scaled.
     //
     uint64_t PacingBytes =
-        Bbr->PacingRate * TimeSinceLastSend / kMicroSecsInSec / BW_UNIT;
+        EffectivePacingRate * TimeSinceLastSend / kMicroSecsInSec / BW_UNIT;
 
     if (PacingBytes >= Available) {
         return Available;
