@@ -60,3 +60,18 @@ cmake --build build/linux/x64_quictls
   原生路径（~/msquic），那里用的是 ext4，速度快很多。
 
   你现在可以先装 WSL2 + Ubuntu 22.04，装完告诉我，我帮你确认环境是否就绪。
+
+
+
+```
+直接用 /mnt/d/ 路径,WSL 可以直接访问 Windows 文件系统:
+
+首次 clone:
+git clone /mnt/d/MDIDS_GIT/open_source ~/open_source
+
+如果已经 clone 过,拉取最新:
+cd ~/open_source
+git pull
+
+```
+
